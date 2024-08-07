@@ -1,5 +1,5 @@
 # pet-pkgm
-The pet-pkgm is a simple package manager made in C. It can install, remove or update packages on your system. It's quite simple to use.
+The pet-pkgm is a simple package manager made in Python (rewrite in C soon). It can install, remove or update packages on your system. It's quite simple to use.
 # Usage
 To install a package on your system: `pet install [pkgname]`
 
