@@ -1,0 +1,17 @@
+{
+    "repositoryName": "main",
+    "packages": [
+        {
+            "pkgname": "musl",
+            "pkgver": "1.2.5-r0",
+            "pkgdesc": "A C library that implements standards and widely accepted extensions",
+            "pkgdeps": "none"
+        },
+        {
+            "pkgname": "petpet-base",
+            "pkgver": "1.0.0",
+            "pkgdesc": "A meta-package that installs several essential packages.",
+            "pkgdeps": "musl sinit oksh petpet-pkg coreutils util-linux"
+        }
+    ]
+}
