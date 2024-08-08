@@ -7,6 +7,8 @@ To update a package on your system: `pet update [pkgname]`
 
 To update your whole system: `pet update all`
 
+To add a repository: `pet add-repo [repo-link]`
+
 To remove a package on your system: `pet remove [pkgname]`
 # License
 Licensed under EUPL-1.2.
