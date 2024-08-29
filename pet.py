@@ -2,9 +2,55 @@ import sys
 import json
 import os
 import requests
+import sqlite3
+import shutil
 
 PACKAGE_LIST_FILE = 'packages.json'
 REPOSITORIES_DIR = 'repositories'
+DB_FILE = 'package_manager.db'
+
+def init_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS installed_packages (
+                          name TEXT PRIMARY KEY,
+                          version TEXT
+                          )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS repositories (
+                          name TEXT PRIMARY KEY,
+                          url TEXT
+                          )''')
+        conn.commit()
+
+def add_repo_to_db(repo_name, repo_url):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR REPLACE INTO repositories (name, url) VALUES (?, ?)', (repo_name, repo_url))
+        conn.commit()
+
+def get_repos_from_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT name, url FROM repositories')
+        return cursor.fetchall()
+
+def add_package_to_db(package_name, package_version):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR REPLACE INTO installed_packages (name, version) VALUES (?, ?)', (package_name, package_version))
+        conn.commit()
+
+def remove_package_from_db(package_name):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM installed_packages WHERE name = ?', (package_name,))
+        conn.commit()
+
+def is_package_installed(package_name):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1 FROM installed_packages WHERE name = ?', (package_name,))
+        return cursor.fetchone() is not None
 
 def load_package_list(repo_dir=None):
     if repo_dir is None:
@@ -53,6 +99,7 @@ def install_package(package_name):
                             for dep in dependencies:
                                 print(f"Installing {dep}...")
                             print(f"Package '{package_name}' and dependencies installed successfully.")
+                            add_package_to_db(package_name, pkg['pkgver'])
                         elif confirmation == 'N':
                             print(f"\nInstallation of '{package_name}' and dependencies cancelled.")
                         else:
@@ -63,6 +110,7 @@ def install_package(package_name):
                         if confirmation == 'Y':
                             print(f"\nInstalling '{package_name}'...")
                             print(f"Package '{package_name}' installed successfully.")
+                            add_package_to_db(package_name, pkg['pkgver'])
                         elif confirmation == 'N':
                             print(f"\nInstallation of '{package_name}' cancelled.")
                         else:
@@ -83,9 +131,7 @@ def remove_package(package_name):
         print(f"Error: No packages are currently installed.")
         return
 
-    installed_packages = [pkg for pkg in os.listdir(installed_dir) if os.path.isdir(os.path.join(installed_dir, pkg))]
-    
-    if package_name not in installed_packages:
+    if not is_package_installed(package_name):
         print(f"Package '{package_name}' is not installed on the system.")
         return
 
@@ -94,7 +140,8 @@ def remove_package(package_name):
     if confirmation == 'Y':
         package_dir = os.path.join(installed_dir, package_name)
         if os.path.exists(package_dir):
-            os.rmdir(package_dir)
+            shutil.rmtree(package_dir)
+        remove_package_from_db(package_name)
         print(f"\nPackage '{package_name}' removed successfully.")
     elif confirmation == 'N':
         print(f"\nRemoval of '{package_name}' cancelled.")
@@ -102,24 +149,39 @@ def remove_package(package_name):
         print(f"\nInvalid input. Please enter 'Y' or 'N'.")
 
 def update_package(package_name):
-    package_data = load_package_list()
-    packages = package_data.get('packages', [])
+    repos = get_repos_from_db()
     
-    for pkg in packages:
-        if pkg['pkgname'] == package_name:
-            print(f"Updating '{package_name}'...")
-            print(f"Package '{package_name}' updated successfully.")
-            return
+    for repo_name, repo_url in repos:
+        repo_path = os.path.join(REPOSITORIES_DIR, repo_name)
+        try:
+            package_data = load_package_list(repo_path)
+            packages = package_data.get('packages', [])
 
-    print(f"Package '{package_name}' not found in the package list.")
+            for pkg in packages:
+                if pkg['pkgname'] == package_name:
+                    print(f"Updating '{package_name}'...")
+                    print(f"Package '{package_name}' updated successfully.")
+                    return
+
+        except json.JSONDecodeError:
+            print(f"Error decoding JSON in repository '{repo_name}'.")
+
+    print(f"Package '{package_name}' not found in any repository.")
 
 def update_all():
-    package_data = load_package_list()
-    packages = package_data.get('packages', [])
+    repos = get_repos_from_db()
     
     print("Updating all packages...")
-    for pkg in packages:
-        print(f"Updating '{pkg['pkgname']}'...")
+    for repo_name, repo_url in repos:
+        repo_path = os.path.join(REPOSITORIES_DIR, repo_name)
+        try:
+            package_data = load_package_list(repo_path)
+            packages = package_data.get('packages', [])
+            for pkg in packages:
+                print(f"Updating '{pkg['pkgname']}'...")
+        except json.JSONDecodeError:
+            print(f"Error decoding JSON in repository '{repo_name}'.")
+
     print("All packages updated successfully.")
 
 def add_repo(repo_url):
@@ -128,6 +190,11 @@ def add_repo(repo_url):
         response.raise_for_status()
 
         repo_data = response.json()
+
+        if isinstance(repo_data, list):
+            print("Repository JSON is a list. Expected a dictionary.")
+            return
+
         repo_name = repo_data.get('repositoryName')
 
         if not repo_name:
@@ -141,6 +208,7 @@ def add_repo(repo_url):
         with open(packages_file_path, 'w') as file:
             json.dump(repo_data, file, indent=4)
 
+        add_repo_to_db(repo_name, repo_url)
         print(f"Repository '{repo_name}' added successfully.")
 
     except requests.RequestException as e:
@@ -149,14 +217,10 @@ def add_repo(repo_url):
         print("Error decoding JSON from the repository URL.")
 
 def find_package(package_name):
-    if not os.path.exists(REPOSITORIES_DIR):
-        print(f"Error: No repositories found.")
-        return
-
-    repo_dirs = [d for d in os.listdir(REPOSITORIES_DIR) if os.path.isdir(os.path.join(REPOSITORIES_DIR, d))]
+    repos = get_repos_from_db()
     found = False
 
-    for repo_name in repo_dirs:
+    for repo_name, repo_url in repos:
         repo_path = os.path.join(REPOSITORIES_DIR, repo_name)
         packages_json_path = os.path.join(repo_path, 'packages.json')
         
@@ -179,9 +243,29 @@ def find_package(package_name):
     if not found:
         print(f"Package '{package_name}' not found in any repository.")
 
+def list_packages():
+    repos = get_repos_from_db()
+    
+    for repo_name, repo_url in repos:
+        repo_path = os.path.join(REPOSITORIES_DIR, repo_name)
+        packages_json_path = os.path.join(repo_path, 'packages.json')
+        
+        if os.path.isfile(packages_json_path):
+            print(f"\nRepository: {repo_name}")
+            with open(packages_json_path, 'r') as file:
+                try:
+                    repo_data = json.load(file)
+                    packages = repo_data.get('packages', [])
+                    for pkg in packages:
+                        print(f"Package Name: {pkg['pkgname']}, Version: {pkg['pkgver']}")
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON in repository '{repo_name}'.")
+
 def main():
+    init_db()
+    
     if len(sys.argv) < 2:
-        print("Usage: pet [install|remove|update|add-repo|find] [pkgname|all|repo-url]")
+        print("Usage: pet [install|remove|update|add-repo|find|list] [pkgname|all|repo-url]")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -223,9 +307,12 @@ def main():
             sys.exit(1)
         package_name = sys.argv[2]
         find_package(package_name)
+    
+    elif command == 'list':
+        list_packages()
 
     else:
-        print("Usage: pet [install|remove|update|add-repo|find] [pkgname|all|repo-url]")
+        print("Usage: pet [install|remove|update|add-repo|find|list] [pkgname|all|repo-url]")
         sys.exit(1)
 
 if __name__ == "__main__":
