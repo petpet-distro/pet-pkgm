@@ -1,7 +1,7 @@
 import sys
 import json
 import os
-import requests
+import requests # i hate you requests why are so fucking commonly used but ofc your not a default lib in python 3:<
 import sqlite3
 import shutil
 
