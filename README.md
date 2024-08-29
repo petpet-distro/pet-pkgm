@@ -1,5 +1,7 @@
 # pet-pkgm
 The pet-pkgm is a simple package manager made in Python. It can install, remove or update packages on your system. It's quite simple to use.
+
+To install all the dependencies for pet-pkgm, clone this repository and type `pip install -r requirements.txt`
 # Usage
 To install a package on your system: `pet install [pkgname]`
 
